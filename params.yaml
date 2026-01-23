@@ -1,0 +1,16 @@
+input_rds: "/path/to/samplewise_multiome.rds"
+celltype_col: "celltype"
+condition_col: "condition"
+sample_col: "sample_id"
+
+tau_gene: "MAPT"
+
+cell_groups:
+  Initiation: ["L2/3 IT","L5 IT","L5 ET","L6 IT","L6 IT Car3","L6 CT","L5/6 NP","L6b"]
+  Propagation: ["Sst","Sst Chodl","PValb","Vip","Lamp5","Sncg","Oligo","OPC","Micro-PVM","Astro"]
+  Acceleration: ["Endo","VLMC"]
+
+min_cells: 50
+network_method: "wgcna"
+threads: 16
+#
