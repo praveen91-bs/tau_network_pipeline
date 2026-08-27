@@ -1,180 +1,106 @@
-# SEA-AD Single-Nucleus Multiome Hippocampal Analysis Pipeline
+# Single-Nucleus Multiome Analysis of Alzheimer's Disease in the Human Hippocampus
 
-An R pipeline for analyzing the SEA-AD single-nucleus **multiome (RNA + ATAC)** hippocampus
-dataset (~41 donors). It moves from per-sample processing, through **WGCNA co-expression
-networks**, **differential co-expression (kME rewiring)** to an active gene signature,
-**PANDA/LIONESS TF-regulatory inference**, and finally **tau/AD disease-anchor network
-placement** across the STRING + OmniPath interactome.
+An integrative analysis of the **SEA-AD single-nucleus multiome (RNA + ATAC)** hippocampus dataset
+(~41 donors) that reconstructs how gene-regulatory programs are rewired in Alzheimer's disease
+(AD) — from co-expression networks, to transcription-factor (TF) regulation, to placement of
+candidate genes within the established tau/AD interactome.
 
-The published scripts analyze **seven cell-type groups**; per the analysis design, the
-**manuscript is reported for CA1 pyramidal neurons only**, with the other six groups serving as
-screening/robustness context. See [design_narrative.md](design_narrative.md) for the authoritative
-methodology write-up (the "why" behind each stage).
+The analysis is organized around a single life-science question: **which genes and regulators
+change their regulatory relationships — not just their expression — in AD, and how do they connect
+to the core tau-pathology machinery?**
 
----
+## Biological scope
 
-## Pipeline stages
+- **Cell types.** Seven groups are analyzed: the hippocampal subfields **CA1** and **DG** neurons,
+  the glial populations **microglia**, **astrocytes**, **oligodendroglia**, and the class-level
+  supersets **excitatory** and **inhibitory** neurons. The other eleven groups (e.g. CA2/CA3, PV/SST
+  interneurons, vascular cells) are pseudobulked but not analyzed, limited by per-group donor/nuclei
+  depth in this cohort — not a judgment of their biological relevance.
+- **Reported scope.** The manuscript focuses on **CA1 pyramidal neurons**, the hippocampal subfield
+  most vulnerable to tau pathology; the other six groups serve as screening and robustness context.
+- **Approach.** Because differential *expression* is underpowered at the per-condition sample sizes
+  available here, the pipeline instead detects **differential co-expression** — genes whose
+  connectivity within their network changes with disease — which is more sensitive to regulatory
+  rewiring.
 
-Scripts are numbered and **must be run in strict order** — each depends on outputs/checkpoints
-from the previous stage. Only these eight are the current, published pipeline.
+## Analysis stages and biological rationale
 
-| # | Script | Purpose | Key outputs |
-|---|--------|---------|-------------|
-| 1 | `00_multiome_label_processing.R` | Per-sample RNA+ATAC QC (from SEA-AD reference metadata), MACS3 peak calling, ATAC rebuild from peaks, WNN clustering/UMAP, motif + chromVAR deviation scoring, label validation | `HIP_processed_labels/RDS_objects/{sample}_object.rds`, `consensus_peaks.rds` |
-| 2 | `00B_multiome_cell_groups.R` | Standalone: (re)assigns `cell_group`/`cell_sub_group` from `sea_ad_supertype` | updated per-sample RDS objects |
-| 3 | `01A_RNA_pseudobulking.R` | RNA pseudobulk per cell-type group (18 groups) | `{group}_pseudobulk.rds` |
-| 4 | `01B_ATAC_pseudobulking.R` | ATAC consensus pseudobulk + peak–gene linkage module (18 groups) | `{group}_ATAC_pseudobulk.rds`, `{group}_peak_gene_links.rds`/`.csv` |
-| 5 | `02_WGCNA.R` | WGCNA network + module-trait gate + within-dataset stability (per cell type) | `{safe_ct}/checkpoint_WGCNA.rds` |
-| 6 | `03_WGCNA_differential_coexpression.R` | Control-vs-AD kME rewire → final **active signature** | `final_active_signature.csv`, `checkpoint_diffcoex.rds` |
-| 7 | `04_TF_netzoo.R` | PANDA + LIONESS TF-network inference on the active signature | `checkpoint_netZooR.rds`, ranked TF CSVs |
-| 8 | `05AB_network.R` | STRING→OmniPath tau/AD disease-anchor network placement | `network05AB_v2/` CSV + PNG deliverables |
+| # | Stage | What it asks, biologically |
+|---|-------|----------------------------|
+| 1 | `00_multiome_label_processing.R` | Per-donor RNA+ATAC QC (built on SEA-AD reference metadata), peak calling, multimodal clustering into cell types, and motif/chromVAR scoring. Establishes the cell-type identities used downstream. |
+| 2 | `00B_multiome_cell_groups.R` | Assigns consistent `cell_group`/`cell_sub_group` labels from SEA-AD supertypes so all cell types are defined on the same reference. |
+| 3 | `01A`/`01B` pseudobulking | Aggregates RNA and ATAC signal to per-cell-type pseudobulk profiles and links open chromatin (peaks) to genes (peak–gene linkage) — laying the regulatory groundwork for TF inference. |
+| 4 | `02_WGCNA.R` | Builds cell-type-specific **gene co-expression networks** and identifies modules associated with dementia and AD neuropathology. |
+| 5 | `03_WGCNA_differential_coexpression.R` | The core step: tests whether a gene's **module membership shifts between control and AD** (kME rewiring), yielding a final **active gene signature** of disease-rewired genes. |
+| 6 | `04_TF_netzoo.R` | Places the active signature under **transcription-factor regulation** (PANDA + LIONESS), integrating motif, protein–protein-interaction, and expression evidence with curated regulatory databases. |
+| 7 | `05AB_network.R` | Connects signature genes and their TFs to a **tau-centered AD interactome** (tau kinase biology + established AD-risk genes) via STRING + an OmniPath directional-evidence layer, producing candidate genes → TF → tau-anchor regulatory chains and network figures. |
 
-`02`–`05AB` all loop over the same seven-group `CELL_GROUPS`
-(`CA1_neurons`, `DG_neurons`, `microglia`, `astrocytes`, `oligodendroglia`, `exc_neurons`,
-`inh_neurons`). `01A`/`01B` pseudobulk all **eighteen** groups (14 fine subgroups + 4 class-level
-supersets); only the seven-group subset is analyzed downstream.
+### What makes the active signature meaningful
 
----
+The final disease-rewired gene set is selected by an **effect-size-anchored, three-gate** criterion
+rather than significance alone:
 
-## Requirements
+- a minimum shift in module membership between control and AD,
+- hub-level membership in at least one condition, and
+- significance on the differential-membership test.
 
-- **R** (recent stable) with the following packages (Bioconductor + CRAN):
-  - `Seurat`, `SeuratObject`, `Signac`, `Matrix`
-  - `WGCNA`, `DESeq2`, `limma`
-  - `netZooR` (PANDA/LIONESS)
-  - `GenomicRanges`, `GenomeInfoDb`, `IRanges`, `motifmatchr`, `TFBSTools`,
-    `BSgenome.Hsapiens.UCSC.hg38`, `TxDb.Hsapiens.UCSC.hg38.knownGene`, `org.Hs.eg.db`,
-    `JASPAR2024`, `RSQLite`
-  - `igraph`, `ggraph`, `tidygraph`, `ggplot2`, `dplyr`, `tidyr`, `tibble`, `purrr`, `stringr`,
-    `data.table`, `pheatmap`, `ggpubr`, `patchwork`, `ggrepel`, `RColorBrewer`, `caret`,
-    `matrixStats`, `progress`
-- **MACS3** — peak calling. Set the `MACS3_PATH` environment variable to its binary
-  (default: `~/miniconda3/envs/macs_env/bin/macs3`).
+This deliberately avoids a p-value-only gate, which would be dominated by unstable estimates from
+small within-condition samples. The result is a ranked, mechanistically annotated candidate set for
+external validation — hypothesis-generating, not confirmatory.
 
----
+## Reproducibility
 
-## Input data (not checked in)
+- Fixed random seed (`set.seed(42)`) throughout; shared `bicor` (biweight midcorrelation)
+  conventions across stages.
+- Scripts run in strict order (numbered); each guards on its upstream output and skips gracefully
+  when inputs are missing, so a single cell type failing does not halt the others.
+- Pseudobulk and network stages are resume-aware: interrupted runs can be re-invoked, and the
+  STRING/OmniPath reference tables are cached under `references/` to avoid repeated downloads.
 
-The following are expected on disk and are **not** version-controlled:
+## Repository layout
 
-- `raw_data/multiome_HIP_h5_data/` — raw multiome H5 files
-- `raw_data/multiome_HIP_tsv_files/` — fragment/TSV files
-- `SEA_AD_anno/SEAAD_HIP_RNAseq_final-nuclei_metadata.*.csv` — SEA-AD reference per-nucleus metadata
-- `SEA_AD_metadata/` — sample-level metadata (`merged_metadata.csv`)
-- `references/` — external assets (annotations, STRING PPI, OmniPath/regulatory-database CSVs)
+```
+raw_data/
+    multiome_HIP_h5_data/      # raw multiome H5 files
+    multiome_HIP_tsv_files/    # fragment files (*_atac_fragments.tsv.gz)
+HIP_processed_data/            # populated at runtime
+    RDS_objects/               # per-sample processed Seurat objects
+    pseudobulk_objects/        # pseudobulk matrices and peak–gene links
+references/                    # external assets (STRING, OmniPath, regulatory DBs)
+results/{cell_type}/           # per-cell-type outputs: WGCNA/ netzoo/ network/
+SEA_AD_anno/, SEA_AD_metadata/ # SEA-AD reference metadata (read-only inputs)
+```
 
-`HIP_processed_labels/` and `results_final_v2/` are populated at runtime.
+The manuscript-relevant deliverables are the per-cell-type `final_active_signature.csv` (stage 5),
+the ranked TF tables (stage 6), and the candidate → tau-anchor network context tables and figures
+(stage 7).
 
----
+## Running
 
-## Running the pipeline
+From the repository root, in order:
 
 ```bash
-Rscript 00_multiome_label_processing.R   # per-sample QC/processing + motif scoring
-Rscript 00B_multiome_cell_groups.R       # reassign cell_group / cell_sub_group
-Rscript 01A_RNA_pseudobulking.R          # RNA pseudobulk (18 groups)
-Rscript 01B_ATAC_pseudobulking.R         # ATAC pseudobulk + peak-gene linkage (18 groups)
-Rscript 02_WGCNA.R                       # WGCNA + module-trait gate + stability (7 groups)
-Rscript 03_WGCNA_differential_coexpression.R  # kME rewiring -> active signature
-Rscript 04_TF_netzoo.R                   # PANDA + LIONESS TF inference
-Rscript 05AB_network.R                   # STRING -> OmniPath tau/AD anchor network
+Rscript 00_multiome_label_processing.R
+Rscript 00B_multiome_cell_groups.R
+Rscript 01A_RNA_pseudobulking.R
+Rscript 01B_ATAC_pseudobulking.R
+Rscript 02_WGCNA.R
+Rscript 03_WGCNA_differential_coexpression.R
+Rscript 04_TF_netzoo.R
+Rscript 05AB_network.R
 ```
 
-- **Resume-aware:** `01A`/`01B` are checkpointed via temp dirs (`tmp_rna`/`tmp_atac`) and
-  `{group}_PHASE2_DONE` markers. To force a full re-run, delete the relevant output files/temp
-  dirs first. `01B`'s peak–gene link file and `05AB`'s cached STRING table
-  (`references/STRING_gene_edges_075.rds`) are each individually skip-gated.
-- **Cell-type loops** guard on upstream files and `next` (not `stop()`) when inputs are missing,
-  so one failing cell type won't halt the others.
-- There is **no test runner or CI**. Syntax-check all scripts with:
+Requires R with Bioconductor/CRAN packages for single-cell analysis (Seurat, Signac, WGCNA),
+network inference (netZooR), and network visualization (igraph/ggraph), plus MACS3 for peak calling
+(set `MACS3_PATH` if not at the default location).
 
-```bash
-for f in *.R; do Rscript -e "invisible(parse('$f'))" || echo "PARSE FAIL: $f"; done
-```
+## Scope
 
----
-
-## Directory layout
-
-`safe_ct = gsub("[/\\ ]", "_", ct)`, consistent across `02`–`05AB`. Per-cell-type state lives
-under `{WGCNA_DIR}/{safe_ct}/` (default `WGCNA_DIR = "results_final_v2"`):
-
-```
-results_final_v2/{safe_ct}/
-├── WGCNA/          # 02 & 03 outputs/checkpoints
-├── netzoo/         # 04 outputs (checkpoint_netZooR.rds, ranked TF tables)
-└── network05AB_v2/ # 05AB outputs (CSVs + PNG figures)
-```
-
-### Checkpoint propagation
-
-- `checkpoint_WGCNA.rds` (from `02`) → consumed by `03` and `04`
-- `checkpoint_diffcoex.rds` (from `03`) → consumed by `04` only
-- `final_active_signature.csv` (from `03`) → consumed by `04` and `05AB`
-- `checkpoint_netZooR.rds` (from `04`) → consumed by `05AB`
-
-`04` and `05AB` append rows to a per-cell-type `manuscript_summary_{safe_ct}.csv` (an accumulating
-log); `05AB` drops its own prior `Phase` rows before appending to avoid duplication on re-runs.
-
----
-
-## Key design decisions
-
-These conventions are load-bearing — preserve them if you modify the pipeline:
-
-- **`mat_cleaned` only, no `mat_blinded`.** `limma::removeBatchEffect` protects
-  `condition + ADNC` in the correction design, so biological signal is preserved and module-trait
-  correlations are **optimistic by construction** — treat magnitudes as upper bounds. The blinded
-  companion matrix was deliberately removed; don't reintroduce it.
-- **Reproducibility.** `set.seed(42)` at the top of every script; sub-steps reseed locally for
-  specific resampling loops.
-- **`bicor` everywhere** — biweight midcorrelation, not Pearson/Spearman.
-- **Active-signature gate is three-legged** (not significance alone):
-  `|ΔkME| ≥ 0.6` AND `kME_max ≥ 0.6` AND BH-padj < 0.05 (Fisher r-to-z).
-- **`02` module-selection gate:** `|bicor| > 0.3` with Dementia OR ADNC (BH-padj < 0.05) AND
-  Moderate/Strong stability. **Braak is excluded** from this gate, reserved as a clean readout for
-  downstream PC1 tracking.
-- **`05AB` uses a fixed tau-centered anchor set**, not a multi-variant sweep:
-  STRING v12.0 (score ≥ 0.75) + a separate OmniPath directional-evidence layer.
-- **No literal DEG/DAR test anywhere** — differential co-expression (kME shift) is the pipeline's
-  substitute, by design.
-
----
-
-## Known issues
-
-- **`04_TF_netzoo.R` `WGCNA_DIR` mismatch.** `04` sets `WGCNA_DIR <- "results_final_v3"` while
-  `02`/`03`/`05AB` use `"results_final_v2"`. This makes `04` look for checkpoints under
-  `results_final_v3/{ct}/WGCNA/` that `02`/`03` never wrote, so it will **skip every cell type**.
-  Verify the directory matches `results_final_v2` before running, or align it across scripts.
-
----
-
-## Scope & excluded scripts
-
-Only the eight scripts above are part of the current, published pipeline. The following
-exploratory/legacy files are **not** part of it and should not be treated as current stages:
-
-- `00C_subsampling.R`, `05_network.R`, `05A_network.R`, `06_evidence_scoring.R`,
-  `07_threshold_sensitivity.R` — older/exploratory, superseded or standalone.
-- `05AB_net_figure.R` — referenced in legacy notes but **does not exist** in this directory; do not
-  treat it as runnable.
-
----
-
-## Methodology
-
-[design_narrative.md](design_narrative.md) is the authoritative methodology write-up — the
-rationale for each gate, what counts as independent vs. convergent evidence, why no literal
-DEG/DAR test exists, and why CA1 is the reported cell type.
-
----
+Only the eight numbered scripts above constitute the published pipeline.
 
 ## License
 
 _Add your license here._ No `LICENSE` file is currently included in this repository.
-
----
 
 ## Citation
 
@@ -182,7 +108,7 @@ _Add a BibTeX citation for the manuscript/preprint here when available._ For exa
 
 ```bibtex
 @misc{multiome_hip,
-  title        = {SEA-AD Single-Nucleus Multiome Hippocampal Analysis Pipeline},
+  title        = {Single-Nucleus Multiome Analysis of Alzheimer's Disease in the Human Hippocampus},
   author       = {TODO},
   year         = {2026},
   note         = {GitHub repository}
