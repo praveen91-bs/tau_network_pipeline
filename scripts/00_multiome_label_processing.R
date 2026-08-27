@@ -13,7 +13,7 @@ source("00B_multiome_cell_groups.R")
 # ---- paths ----
 H5_DIR   <- "raw_data/multiome_HIP_h5_data"
 FRAG_DIR <- "raw_data/multiome_HIP_tsv_files"
-OUT_DIR  <- "HIP_processed_labels"
+OUT_DIR  <- "HIP_processed_data"
 RDS_DIR  <- file.path(OUT_DIR, "RDS_objects")
 ATAC_CACHE <- file.path(RDS_DIR, "HIP_ATAC_objects")
 ANNO_DIR <- file.path(OUT_DIR, "annotation_validation")

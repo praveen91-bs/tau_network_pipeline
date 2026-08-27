@@ -39,8 +39,8 @@ suppressPackageStartupMessages({
 set.seed(42)
 
 # --- CONFIGURATION ---
-WGCNA_DIR        <- "results_final_v3"
-PB_DIR           <- "HIP_processed_labels/PG_pseudobulk"
+WGCNA_DIR        <- "results"
+PB_DIR           <- "HIP_processed_data/pseudobulk_objects"
 CELL_GROUPS      <- c("CA1_neurons", "DG_neurons", "microglia", "astrocytes",
                      "oligodendroglia", "exc_neurons", "inh_neurons")
 PPI_CACHE_FILE   <- "references/STRING_ppi_human.rds"

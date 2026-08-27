@@ -12,7 +12,7 @@ suppressPackageStartupMessages({
 set.seed(42)
 
 # ==== CONFIGURATION (mirrors 02_WGCNA.R) ====
-WGCNA_DIR   <- "results_final_v2"
+WGCNA_DIR   <- "results"
 # Seven cell-type groups from 01A/01B; keep identical to 02's CELL_GROUPS.
 CELL_GROUPS <- c("CA1_neurons", "DG_neurons", "microglia", "astrocytes",
                  "oligodendroglia", "exc_neurons", "inh_neurons")

@@ -9,9 +9,9 @@ suppressPackageStartupMessages({
 set.seed(42)
 
 # --- CONFIGURATION ---
-WGCNA_DIR <- "results_final_v2"
+WGCNA_DIR <- "results"
 dir.create(WGCNA_DIR, recursive = TRUE, showWarnings = FALSE)
-PB_DIR <- "HIP_processed_labels/PG_pseudobulk"
+PB_DIR <- "HIP_processed_data/pseudobulk_objects"
 
 # Seven analyzed cell-type groups (subset of 01A/01B's 18); keep identical in 03-07.
 CELL_GROUPS <- c("CA1_neurons", "DG_neurons", "microglia", "astrocytes",

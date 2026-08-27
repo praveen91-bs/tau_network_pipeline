@@ -51,8 +51,8 @@ set.seed(42)
 # =====================================================================
 # CONFIGURATION
 # =====================================================================
-WGCNA_DIR        <- "results_final_v2"
-PB_DIR           <- "HIP_processed_labels/PG_pseudobulk"
+WGCNA_DIR        <- "results"
+PB_DIR           <- "HIP_processed_data/pseudobulk_objects"
 REFERENCES_DIR   <- "references"
 OMNIPATH_INTERACTION_FILE <- "references/omnipath_human_interactions.csv"
 OMNIPATH_PTM_FILE         <- "references/omnipath_human_enzsub.csv"
@@ -474,7 +474,7 @@ resolve_omnipath_direction <- function(sub_ab, sub_ba, a, b) {
 for (ct in CELL_GROUPS) {
   safe_ct <- safe_ct_fn(ct)
   ct_dir  <- file.path(WGCNA_DIR, safe_ct)
-  out_dir <- file.path(ct_dir, "network05AB_v2")
+  out_dir <- file.path(ct_dir, "network")
   dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
 
   message("\n=== 05AB: ", ct, " ===")

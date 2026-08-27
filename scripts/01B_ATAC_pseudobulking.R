@@ -14,9 +14,9 @@ suppressPackageStartupMessages({
 
 set.seed(42)
 
-INPUT_DIR <- "HIP_processed_labels/RDS_objects"
-ATAC_CACHE <- "HIP_processed_labels/RDS_objects/HIP_ATAC_objects"
-OUT_DIR <- "HIP_processed_labels/PG_pseudobulk"
+INPUT_DIR <- "HIP_processed_data/RDS_objects"
+ATAC_CACHE <- "HIP_processed_data/RDS_objects/HIP_ATAC_objects"
+OUT_DIR <- "HIP_processed_data/pseudobulk_objects"
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
 TEMP_DIR <- file.path(OUT_DIR, "tmp_atac")
 
@@ -87,7 +87,7 @@ compute_group_membership <- function(md) {
 MIN_CELLS_ATAC <- 10
 
 # --- Phase 3: Peak->Gene Linkage Module configuration ---
-RNA_PB_DIR       <- "HIP_processed_labels/PG_pseudobulk"  # 01A's OUT_DIR -- must have run first
+RNA_PB_DIR       <- "HIP_processed_data/pseudobulk_objects"  # 01A's OUT_DIR -- must have run first
 BICOR_THRESHOLD  <- 0.4         # peak-gene correlation floor
 TSS_WINDOW_BP    <- 1e6         # +-500kb around each TSS
 DISTANCE_DECAY_BP <- 75000      # distance-decay constant

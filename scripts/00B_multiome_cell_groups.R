@@ -192,7 +192,7 @@ assign_cell_groups_to_obj <- function(obj) {
 
 # ==== Standalone run: reassign groups on all objects (only when run directly) ====
 if (sys.nframe() == 0) {
-  OUT_DIR <- "HIP_processed_labels"
+  OUT_DIR <- "HIP_processed_data"
   RDS_DIR <- file.path(OUT_DIR, "RDS_objects")
   if (!dir.exists(RDS_DIR)) stop("RDS_DIR not found: ", RDS_DIR)
 

@@ -6,8 +6,8 @@ suppressPackageStartupMessages({
   library(SeuratObject); library(Seurat); library(Matrix); library(dplyr)
 })
 
-INPUT_DIR <- "HIP_processed_labels/RDS_objects"
-OUT_DIR <- "HIP_processed_labels/PG_pseudobulk"
+INPUT_DIR <- "HIP_processed_data/RDS_objects"
+OUT_DIR <- "HIP_processed_data/pseudobulk_objects"
 dir.create(OUT_DIR, showWarnings = FALSE, recursive = TRUE)
 TEMP_DIR <- file.path(OUT_DIR, "tmp_rna")
 
