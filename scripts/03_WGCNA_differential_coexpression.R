@@ -25,7 +25,6 @@ N_BOOT_KME             <- 500
 
 # ==== MAIN LOOP PER CELL TYPE ====
 for (ct in CELL_GROUPS) {
-  ct <- CELL_GROUPS[1]
   safe_ct <- gsub("[/\\ ]", "_", ct)
   ct_dir  <- file.path(WGCNA_DIR, safe_ct, "WGCNA")
 
