@@ -33,7 +33,7 @@ to the core tau-pathology machinery?**
 | 4 | `02_WGCNA.R` | Builds cell-type-specific **gene co-expression networks** and identifies modules associated with dementia and AD neuropathology. |
 | 5 | `03_WGCNA_differential_coexpression.R` | The core step: tests whether a gene's **module membership shifts between control and AD** (kME rewiring), yielding a final **active gene signature** of disease-rewired genes. |
 | 6 | `04_TF_netzoo.R` | Places the active signature under **transcription-factor regulation** (PANDA + LIONESS), integrating motif, protein–protein-interaction, and expression evidence with curated regulatory databases. |
-| 7 | `05AB_network.R` | Connects signature genes and their TFs to a **tau-centered AD interactome** (tau kinase biology + established AD-risk genes) via STRING + an OmniPath directional-evidence layer, producing candidate genes → TF → tau-anchor regulatory chains and network figures. |
+| 7 | `05_network.R` | Connects signature genes and their TFs to a **tau-centered AD interactome** (tau kinase biology + established AD-risk genes) via STRING + an OmniPath directional-evidence layer, producing candidate genes → TF → tau-anchor regulatory chains and network figures. |
 
 ### What makes the active signature meaningful
 
@@ -87,7 +87,7 @@ Rscript 01B_ATAC_pseudobulking.R
 Rscript 02_WGCNA.R
 Rscript 03_WGCNA_differential_coexpression.R
 Rscript 04_TF_netzoo.R
-Rscript 05AB_network.R
+Rscript 05_network.R
 ```
 
 Requires R with Bioconductor/CRAN packages for single-cell analysis (Seurat, Signac, WGCNA),
