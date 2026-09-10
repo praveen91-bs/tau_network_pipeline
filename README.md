@@ -71,9 +71,8 @@ results/{cell_type}/           # per-cell-type outputs: WGCNA/ netzoo/ network/
 SEA_AD_anno/, SEA_AD_metadata/ # SEA-AD reference metadata (read-only inputs)
 ```
 
-The manuscript-relevant deliverables are the per-cell-type `final_active_signature.csv` (stage 5),
-the ranked TF tables (stage 6), and the candidate → tau-anchor network context tables and figures
-(stage 7).
+The manuscript-relevant deliverables are the per-cell-type `final_active_signature.csv`,
+the ranked TF tables, and the candidate → tau-anchor network context tables and figures.
 
 ## Running
 
