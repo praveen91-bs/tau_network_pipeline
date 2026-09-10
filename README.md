@@ -100,17 +100,10 @@ Only the eight numbered scripts above constitute the published pipeline.
 
 ## License
 
-_Add your license here._ No `LICENSE` file is currently included in this repository.
+This repository is licensed under the MIT License. The original analysis scripts, custom functions, and workflow code developed for this study may be used, modified, and shared under the terms of the MIT License. This workflow also uses publicly available software and packages, which remain subject to their respective licenses.
+
+See the [LICENSE](LICENSE) file for the full license information.
 
 ## Citation
 
-_Add a BibTeX citation for the manuscript/preprint here when available._ For example:
-
-```bibtex
-@misc{multiome_hip,
-  title        = {Single-Nucleus Multiome Analysis of Alzheimer's Disease in the Human Hippocampus},
-  author       = {TODO},
-  year         = {2026},
-  note         = {GitHub repository}
-}
-```
+_Add a BibTeX citation for the manuscript/preprint here when available._ **Paper under communication**
