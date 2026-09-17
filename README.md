@@ -58,23 +58,6 @@ external validation — hypothesis-generating, not confirmatory.
 - Pseudobulk and network stages are resume-aware: interrupted runs can be re-invoked, and the
   STRING/OmniPath reference tables are cached under `references/` to avoid repeated downloads.
 
-## Repository layout
-
-```
-raw_data/
-    multiome_HIP_h5_data/      # raw multiome H5 files
-    multiome_HIP_tsv_files/    # fragment files (*_atac_fragments.tsv.gz)
-HIP_processed_data/            # populated at runtime
-    RDS_objects/               # per-sample processed Seurat objects
-    pseudobulk_objects/        # pseudobulk matrices and peak–gene links
-references/                    # external assets (STRING, OmniPath, regulatory DBs)
-results/{cell_type}/           # per-cell-type outputs: WGCNA/ netzoo/ network/
-SEA_AD_anno/, SEA_AD_metadata/ # SEA-AD reference metadata (read-only inputs)
-```
-
-The manuscript-relevant deliverables are the per-cell-type `final_active_signature.csv`,
-the ranked TF tables, and the candidate → tau-anchor network context tables and figures.
-
 ## Running
 
 From the repository root, in order:
@@ -93,10 +76,6 @@ Rscript 05_network.R
 Requires R with Bioconductor/CRAN packages for single-cell analysis (Seurat, Signac, WGCNA),
 network inference (netZooR), and network visualization (igraph/ggraph), plus MACS3 for peak calling
 (set `MACS3_PATH` if not at the default location).
-
-## Scope
-
-Only the eight numbered scripts above constitute the published pipeline.
 
 ## License
 
