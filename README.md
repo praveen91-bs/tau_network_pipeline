@@ -34,6 +34,7 @@ to the core tau-pathology machinery?**
 | 5 | `03_WGCNA_differential_coexpression.R` | The core step: tests whether a gene's **module membership shifts between control and AD** (kME rewiring), yielding a final **active gene signature** of disease-rewired genes. |
 | 6 | `04_TF_netzoo.R` | Places the active signature under **transcription-factor regulation** (PANDA + LIONESS), integrating motif, protein–protein-interaction, and expression evidence with curated regulatory databases. |
 | 7 | `05_network.R` | Connects signature genes and their TFs to a **tau-centered AD interactome** (tau kinase biology + established AD-risk genes) via STRING + an OmniPath directional-evidence layer, producing candidate genes → TF → tau-anchor regulatory chains and network figures. |
+| 8 | `06_replication_ROSMAP.R` | Verifies the final gene candidates replication in the **ROSMAP cohort**. |
 
 ### What makes the active signature meaningful
 
