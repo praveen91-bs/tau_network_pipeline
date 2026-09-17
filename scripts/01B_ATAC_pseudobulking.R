@@ -820,4 +820,83 @@ for (grp in group_names) {
      link_list, pg_all, links); gc()
 }
 
+# ==============================================================================
+# PHASE 4 — PEAK-GENE LINK TABLE FOR LIPID / MEMBRANE-RAFT CANDIDATE GENES
+# ==============================================================================
+# Reads the Phase 3 {grp}_peak_gene_links.rds files and exports the subset of
+# links touching the lipid/membrane-raft candidate genes (the same set used by
+# 04's LIPID_GENE_SET). Produces:
+#   one per-group table: {grp}_01B_PeakGene_Lipid_Genes.csv
+#   one cross-group summary: 01B_PeakGene_Lipid_Genes_Summary.csv
+#
+# Evidence tier: these are cis peak-gene co-accessibility/coexpression links
+# only -- positional/network-inferred, NOT curated. They describe WHICH peaks
+# are linked to each lipid gene and how the linkage is weighted (Correlation,
+# Distance, Accessibility, LinkScore), all computed in Phase 3 above. No new
+# inference here.
+LIPID_GENE_SET <- c("ATAD3B", "SORBS3", "GPR183", "ITGB7", "GK", "GK-AS1")
+
+summary_rows <- list()
+phase4_groups <- setdiff(group_names, "All_cells")
+
+for (grp in phase4_groups) {
+  links_file <- file.path(OUT_DIR, paste0(grp, "_peak_gene_links.rds"))
+  if (!file.exists(links_file)) {
+    message("  Phase 4: no peak-gene links for ", grp, " (", basename(links_file),
+            " missing -- run Phase 3) -- skipping")
+    next
+  }
+  links <- readRDS(links_file)
+  if (is.null(links) || !"Gene" %in% colnames(links)) {
+    message("  Phase 4: empty links for ", grp, " -- skipping")
+    next
+  }
+
+  lipid_links <- links[links$Gene %in% LIPID_GENE_SET, , drop = FALSE]
+  if (nrow(lipid_links) == 0) {
+    message("  Phase 4: no lipid-gene links for ", grp)
+    next
+  }
+
+  lipid_links$Group <- grp
+  lipid_links <- lipid_links[, c("Group", "Peak", "Gene", "Distance", "Correlation",
+                                 "Pvalue", "FDR", "DistanceWeight", "Accessibility",
+                                 "LinkScore")]
+  lipid_links <- lipid_links[order(-lipid_links$LinkScore), ]
+
+  out_per_group <- file.path(OUT_DIR, paste0(grp, "_01B_PeakGene_Lipid_Genes.csv"))
+  utils::write.csv(lipid_links, out_per_group, row.names = FALSE)
+  message(paste0("  Phase 4: ", grp, " -- ", nrow(lipid_links),
+                 " lipid-gene links across ", length(unique(lipid_links$Gene)),
+                 " genes (", basename(out_per_group), ")"))
+
+  summary_rows[[length(summary_rows) + 1]] <- lipid_links
+}
+
+if (length(summary_rows) > 0) {
+  lipid_all <- dplyr::bind_rows(summary_rows)
+  lipid_summary <- lipid_all %>%
+    dplyr::group_by(Gene) %>%
+    dplyr::summarise(
+      n_groups          = dplyr::n_distinct(Group),
+      groups            = paste(sort(unique(Group)), collapse = ";"),
+      n_peaks           = dplyr::n(),
+      n_peaks_per_gene   = dplyr::n_distinct(Peak),
+      mean_Correlation  = mean(Correlation, na.rm = TRUE),
+      mean_Distance_bp  = mean(Distance, na.rm = TRUE),
+      mean_Accessibility = mean(Accessibility, na.rm = TRUE),
+      mean_LinkScore    = mean(LinkScore, na.rm = TRUE),
+      max_LinkScore     = max(LinkScore, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    dplyr::arrange(dplyr::desc(n_groups), dplyr::desc(max_LinkScore))
+
+  utils::write.csv(lipid_summary,
+                   file.path(OUT_DIR, "01B_PeakGene_Lipid_Genes_Summary.csv"),
+                   row.names = FALSE)
+  message("\n  Phase 4: cross-group lipid-gene link summary -> 01B_PeakGene_Lipid_Genes_Summary.csv")
+  message(paste0("  Phase 4: ", nrow(lipid_all), " lipid links total; ",
+                 nrow(lipid_summary), " lipid genes with >=1 linked peak"))
+}
+
 message("\n>>> 01B_ATAC_pseudobulking.R complete.")

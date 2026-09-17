@@ -80,17 +80,11 @@ safe_ct_fn <- function(ct) gsub("[/\\ ]", "_", ct)
 # =====================================================================
 TAU_PRIMARY <- "MAPT"
 
-TAU_CORE <- c(
-  "MAPT", "GSK3B", "CDK5", "CDK5R1", "DYRK1A",
-  "MARK2", "MARK4", "CSNK1D", "CSNK1E", "PPP2CA",
-  "PPP2R2A", "FYN", "TTBK1", "TTBK2", "PIN1"
-)
+TAU_CORE <- c("MAPT", "GSK3B", "CDK5", "CDK5R1", "DYRK1A", "MARK2", "MARK4", "CSNK1D", "CSNK1E", "PPP2CA", "PPP2R2A", 
+              "FYN", "TTBK1", "PIN1")
 
-TAU_AD_ASSOCIATED <- c(
-  "APP", "PSEN1", "PSEN2", "APOE", "BIN1", "CLU", "PICALM",
-  "SORL1", "TREM2", "ABCA7", "INPP5D", "PLCG2", "CD33",
-  "VPS35", "LAMP2", "BECN1", "ATG7", "SQSTM1", "HSPA8", "SNCA"
-)
+TAU_AD_ASSOCIATED <- c("APP", "PSEN1", "PSEN2", "BIN1", "CLU", "PICALM", "SORL1", "VPS35", "LAMP2", "BECN1", "ATG7", 
+                       "SQSTM1", "HSPA8") # Tau associated mechanisms
 
 TAU_AD_ANCHORS <- unique(c(TAU_CORE, TAU_AD_ASSOCIATED))
 
@@ -879,6 +873,63 @@ for (ct in CELL_GROUPS) {
   if (nrow(unmapped_rows) > 0) {
     candidate_ctx <- dplyr::bind_rows(candidate_ctx, unmapped_rows)
   }
+
+  # -----------------------------------------------------------------
+  # 8c-iii: Artifact / zero-edge quality flags for candidate genes
+  # -----------------------------------------------------------------
+  # STRING_Artifact_Flag: TRUE when a candidate's STRING neighbours include
+  #   immunoglobulin (IGKV, IGLV, IGHG, IGLC) or ribosomal (RPL, RPS) genes,
+  #   both well-known STRING spurious-hub artefact families.
+  ARTIFACT_PATTERNS <- c("^IG[KLC]V", "^IG[HKL]G", "^IG[KLC]L", "^RPL", "^RPS")
+  string_artifact_flag <- character(nrow(candidate_ctx))
+  string_artifact_note <- character(nrow(candidate_ctx))
+  for (i in seq_len(nrow(candidate_ctx))) {
+    g <- candidate_ctx$Candidate_Lookup[i]
+    if (!candidate_ctx$STRING_Mapped[i] || is.na(g) || !(g %in% igraph::V(g_string)$name)) {
+      string_artifact_flag[i] <- FALSE
+      string_artifact_note[i] <- NA_character_
+      next
+    }
+    nbrs <- igraph::neighbors(g_string, v = g, mode = "all")
+    nbr_names <- igraph::V(g_string)$name[nbrs]
+    artifact_hits <- nbr_names[Reduce(`|`, lapply(ARTIFACT_PATTERNS, function(p) grepl(p, nbr_names)))]
+    if (length(artifact_hits) > 0) {
+      string_artifact_flag[i] <- TRUE
+      string_artifact_note[i] <- paste(utils::head(artifact_hits, 5), collapse = ";")
+    } else {
+      string_artifact_flag[i] <- FALSE
+      string_artifact_note[i] <- NA_character_
+    }
+  }
+  candidate_ctx$STRING_Artifact_Flag <- as.logical(string_artifact_flag)
+  candidate_ctx$STRING_Artifact_Neighbours <- string_artifact_note
+
+  # PANDA_Edge_Count / PANDA_Zero_Edges: count of edges in the PANDA
+  #   active network (Stage 04) per signature gene.  Zero edges means
+  #   no TF regulatory evidence reached the gene through PANDA.
+  panda_edges_file <- file.path(ct_dir, "netzoo", "04_PANDA_Active_Network.csv")
+  panda_edge_count <- setNames(rep(NA_integer_, nrow(candidate_ctx)),
+                               candidate_ctx$Candidate_Lookup)
+  if (file.exists(panda_edges_file)) {
+    panda_net <- read.csv(panda_edges_file, stringsAsFactors = FALSE)
+    if (nrow(panda_net) > 0) {
+      # Edges are directional; count unique gene appearances as source or target
+      all_panda_genes <- unique(c(panda_net$source, panda_net$target))
+      panda_counts <- table(c(panda_net$source, panda_net$target))
+      for (i in seq_len(nrow(candidate_ctx))) {
+        g <- candidate_ctx$Candidate_Lookup[i]
+        panda_edge_count[i] <- as.integer(panda_counts[g])
+        if (is.na(panda_edge_count[i])) panda_edge_count[i] <- 0L
+      }
+    }
+  }
+  candidate_ctx$PANDA_Edge_Count  <- unname(panda_edge_count)
+  candidate_ctx$PANDA_Zero_Edges  <- candidate_ctx$PANDA_Edge_Count == 0L
+
+  n_artifact <- sum(candidate_ctx$STRING_Artifact_Flag, na.rm = TRUE)
+  n_zero_panda <- sum(candidate_ctx$PANDA_Zero_Edges, na.rm = TRUE)
+  message(sprintf("  [%s] Quality flags: %d/%d STRING artefact neighbours, %d/%d zero PANDA edges",
+                  ct, n_artifact, nrow(candidate_ctx), n_zero_panda, nrow(candidate_ctx)))
 
   write.csv(candidate_ctx, file.path(out_dir, "Candidate_Network_Context.csv"),
             row.names = FALSE, quote = FALSE)
@@ -1924,62 +1975,70 @@ for (ct in CELL_GROUPS) {
     }
   }
 
-  string_edges_final <- string_edges_final %>%
-    dplyr::transmute(
-      Source, Target,
-      Source_Type = unname(node_type_lookup[Source]),
-      Target_Type = unname(node_type_lookup[Target]),
-      Edge_Type = "STRING_functional_association",
-      Directionality = "Undirected",
-      STRING_Score = as.numeric(STRING_Score),
-      # OmniPath evidence (full provenance)
-      OmniPath_Supported             = dplyr::coalesce(OmniPath_Supported, FALSE),
-      OmniPath_Direction             = OmniPath_Direction,
-      OmniPath_A_to_B                = dplyr::coalesce(OmniPath_A_to_B, FALSE),
-      OmniPath_B_to_A                = dplyr::coalesce(OmniPath_B_to_A, FALSE),
-      OmniPath_Stimulation           = dplyr::coalesce(OmniPath_Stimulation, FALSE),
-      OmniPath_Inhibition            = dplyr::coalesce(OmniPath_Inhibition, FALSE),
-      OmniPath_Consensus_Direction_Supported = dplyr::coalesce(OmniPath_Consensus_Direction_Supported, FALSE),
-      OmniPath_Consensus_Stimulation = dplyr::coalesce(OmniPath_Consensus_Stimulation, FALSE),
-      OmniPath_Consensus_Inhibition  = dplyr::coalesce(OmniPath_Consensus_Inhibition, FALSE),
-      OmniPath_Sources               = OmniPath_Sources,
-      OmniPath_n_resources           = OmniPath_n_resources,
-      OmniPath_References            = OmniPath_References,
-      # SIGNOR evidence (full provenance)
-      SIGNOR_Supported      = dplyr::coalesce(SIGNOR_Supported, FALSE),
-      SIGNOR_Direction      = SIGNOR_Direction,
-      SIGNOR_A_to_B         = dplyr::coalesce(SIGNOR_A_to_B, FALSE),
-      SIGNOR_B_to_A         = dplyr::coalesce(SIGNOR_B_to_A, FALSE),
-      SIGNOR_Stimulation    = dplyr::coalesce(SIGNOR_Stimulation, FALSE),
-      SIGNOR_Inhibition     = dplyr::coalesce(SIGNOR_Inhibition, FALSE),
-      SIGNOR_References     = SIGNOR_References,
-      SIGNOR_n_references   = SIGNOR_n_references,
-      SIGNOR_Independent    = dplyr::coalesce(SIGNOR_Independent, FALSE),
-      # PTM evidence (full provenance, residue-level)
-      PTM_Supported_A_to_B  = dplyr::coalesce(PTM_Supported_A_to_B, FALSE),
-      PTM_Supported_B_to_A  = dplyr::coalesce(PTM_Supported_B_to_A, FALSE),
-      PTM_Type              = PTM_Type,
-      PTM_Enzyme            = PTM_Enzyme,
-      PTM_Substrate         = PTM_Substrate,
-      PTM_Modification      = PTM_Modification,
-      PTM_Isoforms          = PTM_Isoforms,
-      PTM_Residue_Type      = PTM_Residue_Type,
-      PTM_Residue_Offset    = PTM_Residue_Offset,
-      PTM_Sources           = PTM_Sources,
-      PTM_References        = PTM_References,
-      PTM_Curation_Effort   = PTM_Curation_Effort,
-      # Metadata
-      Path_Length = NA_integer_,
-      Path_Rank = NA_integer_,
-      Evidence_Level,
-      Directional_Evidence = Direction_Classification,
-      Has_Consensus_Direction = dplyr::coalesce(Has_Consensus_Direction, FALSE),
-      Has_Directional_Evidence = dplyr::coalesce(Has_Directional_Evidence, FALSE) |
-        PTM_Supported_A_to_B | PTM_Supported_B_to_A,
-      Has_SIGNOR_Provenance = dplyr::coalesce(Has_SIGNOR_Provenance, FALSE),
-      Evidence_Source,
-      Cell_Type = ct
-    )
+  # -----------------------------------------------------------------
+  # 8h: Biological direction resolution for STRING edges.
+  #
+  # At this point string_edges_final is the canonical STRING edge
+  # universe (Source/Target = pmin/pmax storage order) with all
+  # directional evidence columns merged. Biological direction is
+  # resolved here from that evidence (OmniPath and/or PTM) using the
+  # SAME rule as Figure 2. This is the only place Source/Target take
+  # on biological meaning.
+  #
+  #   forward only  -> Source = a, Target = b, Curated_directed
+  #   reverse only  -> Source = b, Target = a, Curated_directed
+  #   both          -> two rows (a->b and b->a), Curated_directed,
+  #                    Directionality = Bidirectional (matches Figure 2)
+  #   neither       -> canonical orientation, STRING_functional_association
+  #
+  # Undirected STRING edges retain canonical orientation; curated-
+  # directional edges are emitted with biological orientation so Cytoscape
+  # renders the same arrows the figure shows.
+  # -----------------------------------------------------------------
+  if (nrow(string_edges_final) > 0) {
+    string_edges_final <- purrr::map_dfr(seq_len(nrow(string_edges_final)), function(i) {
+      r <- string_edges_final[i, ]
+      a <- r$Source
+      b <- r$Target
+
+      fwd <- isTRUE(r$OmniPath_A_to_B) | isTRUE(r$PTM_Supported_A_to_B)
+      rev <- isTRUE(r$OmniPath_B_to_A) | isTRUE(r$PTM_Supported_B_to_A)
+
+      emit <- function(s, t, etype, diral) {
+        out <- tibble::as_tibble(r)
+        out$Source        <- s
+        out$Target        <- t
+        out$Source_Type   <- unname(node_type_lookup[s])
+        out$Target_Type   <- unname(node_type_lookup[t])
+        out$Edge_Type     <- etype
+        out$Directionality <- diral
+        out$STRING_Score  <- as.numeric(out$STRING_Score)
+        out
+      }
+
+      if (!fwd && !rev) {
+        emit(a, b, "STRING_functional_association", "Undirected")
+      } else if (fwd && !rev) {
+        emit(a, b, "Curated_directed", "Directed")
+      } else if (!fwd && rev) {
+        emit(b, a, "Curated_directed", "Directed")
+      } else {
+        dplyr::bind_rows(
+          emit(a, b, "Curated_directed", "Bidirectional"),
+          emit(b, a, "Curated_directed", "Bidirectional")
+        )
+      }
+    })
+  } else {
+    string_edges_final <- string_edges_final %>%
+      dplyr::mutate(
+        Source_Type = character(),
+        Target_Type = character(),
+        Edge_Type = character(),
+        Directionality = character(),
+        STRING_Score = numeric()
+      )
+  }
 
   # TF regulatory edges (Directed — genuinely directional)
   tf_edges_final <- tibble::tibble(
@@ -2019,7 +2078,9 @@ for (ct in CELL_GROUPS) {
       dplyr::filter(gene %in% has_anchor_path, tf %in% tf_lookup_names) %>%
       dplyr::left_join(
         typed_paths %>%
-          dplyr::select(Candidate_Lookup, Target_Node, Distance),
+          dplyr::group_by(Candidate_Lookup) %>%
+          dplyr::summarise(Distance = min(Distance, na.rm = TRUE),
+                           .groups = "drop"),
         by = c("gene" = "Candidate_Lookup")
       ) %>%
       dplyr::filter(!is.na(Distance) & Distance <= MAX_PATH_LENGTH) %>%
@@ -2128,15 +2189,21 @@ for (ct in CELL_GROUPS) {
   # FINAL STRING SCORE AUDIT
   # -----------------------------------------------------------------
   if (nrow(string_edges_final) > 0) {
-    # Every STRING edge must remain canonical.
-    stopifnot(
-      all(string_edges_final$Source ==
-            pmin(string_edges_final$Source,
-                 string_edges_final$Target)),
-      all(string_edges_final$Target ==
-            pmax(string_edges_final$Source,
-                 string_edges_final$Target))
-    )
+    # Only UNDIRECTED STRING edges must remain canonical (pmin/pmax).
+    # Curated-directional edges are deliberately emitted with biological
+    # Source/Target orientation, so they are not canonical.
+    undirected_str <- string_edges_final %>%
+      dplyr::filter(Directionality == "Undirected")
+    if (nrow(undirected_str) > 0) {
+      stopifnot(
+        all(undirected_str$Source ==
+              pmin(undirected_str$Source,
+                   undirected_str$Target)),
+        all(undirected_str$Target ==
+              pmax(undirected_str$Source,
+                   undirected_str$Target))
+      )
+    }
     # Report missing STRING scores.
     n_missing_string <- sum(is.na(string_edges_final$STRING_Score))
     message(
@@ -2165,8 +2232,12 @@ for (ct in CELL_GROUPS) {
   # 3. All Source/Target nodes present in cyto_nodes
   # -----------------------------------------------------------------
   if (nrow(cyto_edges) > 0) {
-    # Check 1: no duplicate undirected edges
+    # Check 1: no duplicate UNDIRECTED edges (canonical pmin/pmax).
+    # Curated_directed edges are intentionally emitted with biological
+    # orientation (and bidirectional edges as an explicit a->b / b->a
+    # pair), so only STRING_functional_association edges are audited here.
     edge_dups <- cyto_edges %>%
+      dplyr::filter(Directionality == "Undirected") %>%
       dplyr::transmute(E1 = pmin(Source, Target), E2 = pmax(Source, Target),
                        Edge_Type) %>%
        dplyr::count(E1, E2) %>%
@@ -2215,7 +2286,9 @@ for (ct in CELL_GROUPS) {
                   STRING_Mapped, STRING_Degree, Closest_Anchor, Closest_Anchor_Class,
                   Distance, MAPT_Distance, TauCore_Distance, TauAD_Distance,
                   MAPT_Path, Tau_Core_Path, Tau_AD_Path,
-                  MAPT_Relationship, Tau_Core_Relationship, AD_Network_Relationship)
+                  MAPT_Relationship, Tau_Core_Relationship, AD_Network_Relationship,
+                  STRING_Artifact_Flag, STRING_Artifact_Neighbours,
+                  PANDA_Edge_Count, PANDA_Zero_Edges)
 
   # Attach Selected_Anchor_Path from candidate_paths (canonical primary path)
   if (nrow(cand_for_summary) > 0 && nrow(candidate_paths) > 0) {
@@ -3145,43 +3218,12 @@ for (ct in CELL_GROUPS) {
     ggplot2::ggsave(file.path(out_dir, paste0("Figure2_Tau_Centered_Network_", ct, ".png")),
                     p2, width = 12, height = 10, dpi = 300)
   }
-
-  # -----------------------------------------------------------------
-  # 8n: Manuscript summary append
-  # -----------------------------------------------------------------
-  phase_tag <- "Tau_Network_05AB"
-  ms_rows <- data.frame(
-    Component = c("Reference_Network", "STRING_Network", "Candidate_Mapping",
-                   "Direct_Connections", "Paths_2hop", "Paths_3hop", "Paths_beyond3",
-                   "OmniPath_Edges", "SIGNOR_Edges", "Direction_Classification"),
-    Parameter = c("n_seed_genes", "n_nodes_edges", "n_candidates_mapped",
-                   "n_direct", "n_2hop", "n_3hop", "n_beyond",
-                   "n_op_edges", "n_signor_edges", "n_directionally_supported"),
-    Threshold = NA_character_,
-    Value = c(length(TAU_AD_ANCHORS),
-              paste0(igraph::vcount(g_string), "/", igraph::ecount(g_string)),
-              n_mapped,
-              n_direct, n_2hop, n_3hop, n_beyond,
-              if (nrow(op_edges) > 0) sum(op_edges$OmniPath_Supported) else 0L,
-              if (nrow(op_edges) > 0) sum(op_edges$SIGNOR_Supported) else 0L,
-              if (nrow(op_edges) > 0) sum(op_edges$Has_Directional_Evidence, na.rm = TRUE) else 0L),
-    N = as.character(nrow(candidate_ctx)),
-    Cell_Type = ct,
-    Phase = phase_tag,
-    Notes = paste0("STRING>=", STRING_THRESHOLD, "; OmniPath directional annotation; tau/AD anchors"),
-    stringsAsFactors = FALSE
-  )
-
-  prev_file <- file.path(ct_dir, paste0("manuscript_summary_", safe_ct, ".csv"))
-  final_summary <- if (file.exists(prev_file)) {
-    prev <- utils::read.csv(prev_file, stringsAsFactors = FALSE, row.names = NULL) %>%
-      dplyr::mutate(N = as.character(N), Value = as.character(Value)) %>%
-      dplyr::filter(Phase != phase_tag)
-    dplyr::bind_rows(prev, ms_rows)
-  } else ms_rows
-  write.csv(final_summary, prev_file, row.names = FALSE, quote = FALSE)
-
   message("  [", ct, "] Done.")
 }
 
 message("\n05AB complete.")
+
+sink(file.path(WGCNA_DIR, "sessionInfo_05AB_network.txt"))
+print(sessionInfo())
+sink()
+message("sessionInfo saved to: ", file.path(WGCNA_DIR, "sessionInfo_05AB_network.txt"))

@@ -75,6 +75,24 @@ GROUP_TEST_CIS                <- "Dementia"
 MIN_GROUP_N_CISLINK          <- 8
 CIS_SHIFT_JACCARD_THRESHOLD  <- 0.3
 
+# --- Lipid/membrane-raft regulator TF set (Change 3 source) ---
+# Master regulators of cholesterol/lipid metabolism and the nuclear
+# receptors governing lipid/fatty-acid handling. SREBP1/2 and LXR
+# (NR1H2) are the primary cholesterol/oxysterol sensors; PPAR/RXR
+# heterodimers regulate fatty-acid metabolism; NR1H4 (FXR) and NR1I2
+# (PXR) are bile-salt/xenobiotic sensors. Used only to filter the
+# already-computed PANDA-active network + composite TF ranking for the
+# new lower-evidence-tier Results paragraph -- no new network inference.
+LIPID_TF_SET <- c("SREBF1", "SREBF2", "PPARA", "PPARG", "NR1H2",
+                  "NR1H3", "NR1H4", "RXRA", "RXRB", "RXRG", "NR1I2")
+
+# Lipid/membrane-raft candidate genes from 03's active signature
+# (evidence-checked; see Change list): GK (host of GK-AS1) and ITGB7
+# hold up as raft/docking candidates, plus the three already in the
+# narrative (ATAD3B, SORBS3, GPR183). Other signature genes stay in the
+# kinase-mediated narrative, not the lipid thread.
+LIPID_GENE_SET <- c("ATAD3B", "SORBS3", "GPR183", "ITGB7", "GK", "GK-AS1")
+
 # ==============================================================================
 # SMALL HELPERS
 # ==============================================================================
@@ -1342,6 +1360,100 @@ for (ct in CELL_GROUPS) {
   }
 
   # ------------------------------------------------------------------
+  # 2k-i. LIPID-TF TARGET EXTRACTION (lower-evidence Tier for Results)
+  # ------------------------------------------------------------------
+  # Filters the already-computed screened PANDA-active network
+  # (track_a$panda_network) and TF-level rollup (tf_rollup /
+  # ATAC04_TF_Composite_Ranked.csv) for the lipid/membrane-raft
+  # regulator TF set x lipid-gene target set. No new network inference --
+  # this is a filtered export for a new, explicitly lower-evidence-tier
+  # Results paragraph.
+  #
+  #   IMPORTANT EVIDENCE CAVEAT: these TFs sit mid-to-low in the composite
+  #   TF ranking and are largely `Mixed_Coherence` (not clean directional
+  #   coherence); they have ~0% curated-database (TRRUST/DoRothEA/
+  #   CollecTRI) support. Report them ONLY as "positional/network-inferred,
+  #   not curated-confirmed" -- a parallel tier to STRING-only genes vs
+  #   curated-PTM genes, and NEVER at the same confidence as the
+  #   SP1/JUN/JUNB/ESR1 edges already leading the Results.
+  if (!is.null(track_a) && !is.null(track_a$panda_network) && nrow(track_a$panda_network) > 0) {
+    lipid_edges <- track_a$panda_network %>%
+      dplyr::filter(tf %in% LIPID_TF_SET, gene %in% LIPID_GENE_SET) %>%
+      dplyr::select(tf, gene, force, atac_prior_score,
+                    jackknife_stability, expr_bicor,
+                    n_peaks, bicor_strongest, distance_tss_min)
+    # Join the TF-level rollup columns only when available; otherwise NA-fill
+    # so the output schema stays stable whether or not Track A's rollup ran.
+    if (!is.null(tf_rollup) && nrow(tf_rollup) > 0) {
+      lipid_edges <- lipid_edges %>%
+        dplyr::left_join(
+          tf_rollup %>% dplyr::select(TF, Rank,
+                                      Aggregate_Target_Rewiring,
+                                      Mean_Target_Rewiring,
+                                      Mean_PANDA_Force,
+                                      Mean_Jackknife_Stability,
+                                      Curated_TF_Support_Pct,
+                                      dir_coherence, regulatory_mode),
+          by = c("tf" = "TF"))
+    } else {
+      lipid_edges <- lipid_edges %>%
+        dplyr::mutate(Rank = NA_integer_,
+                      Aggregate_Target_Rewiring = NA_real_,
+                      Mean_Target_Rewiring = NA_real_,
+                      Mean_PANDA_Force = NA_real_,
+                      Mean_Jackknife_Stability = NA_real_,
+                      Curated_TF_Support_Pct = NA_real_,
+                      dir_coherence = NA_real_,
+                      regulatory_mode = NA_character_)
+    }
+    lipid_edges <- lipid_edges %>%
+      dplyr::mutate(
+        # Honest label: network/positional inference only unless curated.
+        Curated_Support_Flag = !is.na(Curated_TF_Support_Pct) & Curated_TF_Support_Pct > 0,
+        Composite_Rank = Rank,
+        Coherence = regulatory_mode,
+        Evidence_Tier_Lipid = dplyr::if_else(Curated_Support_Flag,
+                                             "Curated-confirmed", "Network-inferred-not-curated")
+      ) %>%
+      dplyr::arrange(dplyr::desc(abs(force)))
+
+    if (nrow(lipid_edges) > 0) {
+      write.csv(lipid_edges, file.path(ct_dir, "04_Lipid_TF_Targets.csv"),
+                row.names = FALSE, quote = FALSE)
+      n_lipid_edges <- nrow(lipid_edges)
+      n_lipid_tfs  <- length(unique(lipid_edges$tf))
+      n_lipid_genes <- length(unique(lipid_edges$gene))
+      n_curated     <- sum(lipid_edges$Curated_Support_Flag)
+      message(sprintf("  LIPID-TF extraction: %d edges (%d TFs x %d genes), %d curated-supported, %d network-inferred-only",
+                      n_lipid_edges, n_lipid_tfs, n_lipid_genes, n_curated,
+                      n_lipid_edges - n_curated))
+      message("    >> Report these as positional/network-inferred, NOT curated-confirmed,",
+              " and never above the SP1/JUN/ESR1-led tier (see section header).")
+
+      # Append a manuscript-summary row.
+      lipid_ms_row <- data.frame(
+        Component = "5B_netZooR_v2", Parameter = "lipid_TF_target_extraction",
+        Threshold = paste0("TFs in {", paste(LIPID_TF_SET, collapse = ","),
+                           "} x genes in {", paste(LIPID_GENE_SET, collapse = ","), "}"),
+        Value = paste(n_lipid_edges, "edges;", n_lipid_tfs, "TFs;", n_lipid_genes, "genes"),
+        N = as.character(n_lipid_edges), Cell_Type = ct, Phase = "netZooR_lipidTier",
+        Notes = paste0(n_curated, " curated-supported; ", n_lipid_edges - n_curated,
+                       " network-inferred-only (lower evidence tier -- see 04_Lipid_TF_Targets.csv)"),
+        stringsAsFactors = FALSE)
+      prev_lipid <- if (file.exists(file.path(WGCNA_DIR, safe_ct, paste0("manuscript_summary_", safe_ct, ".csv")))) {
+        utils::read.csv(file.path(WGCNA_DIR, safe_ct, paste0("manuscript_summary_", safe_ct, ".csv")),
+                        stringsAsFactors = FALSE, row.names = NULL) %>%
+          dplyr::filter(Phase != "netZooR_lipidTier")
+      } else NULL
+      write.csv(dplyr::bind_rows(prev_lipid, lipid_ms_row),
+                file.path(WGCNA_DIR, safe_ct, paste0("manuscript_summary_", safe_ct, ".csv")),
+                row.names = FALSE, quote = FALSE)
+    } else {
+      message("  LIPID-TF extraction: no lipid-TF x lipid-gene edges in the screened PANDA-active network")
+    }
+  }
+
+  # ------------------------------------------------------------------
   # 2k-ii. GENE-CENTRIC TF REGULATION TABLE (primary per-gene deliverable)
   # ------------------------------------------------------------------
   # Per active gene: its screened TFs, annotated with the TF-level evidence
@@ -1547,109 +1659,6 @@ for (ct in CELL_GROUPS) {
     saveRDS(track_a$lioness, file.path(ct_dir, "04_LIONESS_Active.rds"), compress = "gzip")
     message("  04_LIONESS_Active.rds saved")
   }
-
-  # ------------------------------------------------------------------
-  # 2m. MANUSCRIPT SUMMARY
-  # ------------------------------------------------------------------
-  summary_rows <- list()
-  if (!is.null(track_a)) {
-    summary_rows[[1]] <- data.frame(Component = "5B_netZooR_v2", Parameter = "PANDA_active_TFs_screened",
-      Threshold = paste0("force>", FORCE_MIN, ", no per-gene cap"),
-      Value = as.character(nrow(track_a$tf_ranking)),
-      N = as.character(nrow(track_a$panda_network)), Cell_Type = ct, Phase = "netZooR_active",
-      Notes = "Track A: screened active-signature PANDA", stringsAsFactors = FALSE)
-    summary_rows[[length(summary_rows) + 1]] <- data.frame(
-      Component = "5B_netZooR_v2", Parameter = "hub_transition_genes",
-      Threshold = "04 Rewiring_Tier == Tier1_HubTransition",
-      Value = as.character(length(hub_transition_genes)),
-      N = as.character(length(active_signature)), Cell_Type = ct, Phase = "netZooR_active",
-      Notes = "Reported as Rewiring_Hub_Transition annotation on the gene-centric table",
-      stringsAsFactors = FALSE)
-    if (!is.null(gene_tf_top10) && nrow(gene_tf_top10) > 0) {
-      n_top1_lit <- sum(gene_tf_top10$Edge_Rank == 1 & gene_tf_top10$has_curated_support)
-      summary_rows[[length(summary_rows) + 1]] <- data.frame(
-        Component = "5B_netZooR_v2", Parameter = "gene_tf_top10",
-        Threshold = "|LIONESS_Delta_Force| rank, hub-transition genes only",
-        Value = as.character(dplyr::n_distinct(gene_tf_top10$gene)),
-        N = as.character(nrow(gene_tf_top10)), Cell_Type = ct, Phase = "netZooR_active",
-        Notes = paste0(n_top1_lit, "/", dplyr::n_distinct(gene_tf_top10$gene),
-                       " top-ranked (per-gene) TFs literature-supported; see 04_Gene_TF_Top10.csv"),
-        stringsAsFactors = FALSE)
-    }
-    if ("jackknife_stability" %in% colnames(track_a$panda_network) &&
-        any(!is.na(track_a$panda_network$jackknife_stability))) {
-      js <- track_a$panda_network$jackknife_stability
-      summary_rows[[length(summary_rows) + 1]] <- data.frame(
-        Component = "5B_netZooR_v2", Parameter = "edge_jackknife_stability",
-        Threshold = paste0(">= ", JACKKNIFE_STABLE_THRESHOLD, " (", JACKKNIFE_MIN_DONORS, "+ donors)"),
-        Value = as.character(sum(js >= JACKKNIFE_STABLE_THRESHOLD, na.rm = TRUE)),
-        N = as.character(sum(!is.na(js))), Cell_Type = ct, Phase = "netZooR_active",
-        Notes = paste0("Leave-one-donor-out refits; median stability = ",
-                       round(median(js, na.rm = TRUE), 3)),
-        stringsAsFactors = FALSE)
-    }
-    summary_rows[[length(summary_rows) + 1]] <- data.frame(Component = "5B_netZooR_v2", Parameter = "PANDA_active_top5",
-      Threshold = "force_sum rank", Value = paste(head(track_a$tf_ranking$tf, 5), collapse = ", "),
-      N = "", Cell_Type = ct, Phase = "netZooR_active",
-      Notes = "Top 5 by PANDA force sum (network-quality ranking, not the primary TF ranking)",
-      stringsAsFactors = FALSE)
-    if (!is.null(tf_rollup_summary)) {
-      summary_rows[[length(summary_rows) + 1]] <- data.frame(
-        Component = "5B_netZooR_v2", Parameter = "total_rewiring_score_top5",
-        Threshold = "Aggregate_Target_Rewiring rank (sum |Delta_kME| over screened targets)",
-        Value = paste(tf_rollup_summary$top5_by_rewiring, collapse = ", "),
-        N = as.character(tf_rollup_summary$n), Cell_Type = ct, Phase = "netZooR_active",
-        Notes = paste0("PRIMARY TF ranking (ATAC04_TF_Composite_Ranked.csv order); top TF's Aggregate_Target_Rewiring = ",
-                       tf_rollup_summary$top_rewiring_score),
-        stringsAsFactors = FALSE)
-    }
-    if (!is.null(track_a$tf_validation)) {
-      n_validated_tfs <- sum(track_a$tf_validation$pct_validated > 0)
-      summary_rows[[length(summary_rows) + 1]] <- data.frame(
-        Component = "5B_netZooR_v2", Parameter = "PANDA_curated_validation",
-        Threshold = "any DB", Value = as.character(n_validated_tfs),
-        N = as.character(nrow(track_a$tf_validation)), Cell_Type = ct, Phase = "netZooR_active",
-        Notes = "TFs with >=1 curated DB-confirmed target", stringsAsFactors = FALSE)
-    }
-    n_pos_coh <- sum(track_a$tf_ranking$regulatory_mode == "Positive_Coherence", na.rm = TRUE)
-    n_neg_coh <- sum(track_a$tf_ranking$regulatory_mode == "Negative_Coherence", na.rm = TRUE)
-    summary_rows[[length(summary_rows) + 1]] <- data.frame(
-      Component = "5B_netZooR_v2", Parameter = "expression_force_coherence",
-      Threshold = "sign of expr-force correlation", Value = paste(n_pos_coh, "pos/", n_neg_coh, "neg"),
-      N = as.character(nrow(track_a$tf_ranking)), Cell_Type = ct, Phase = "netZooR_active",
-      Notes = "Positive_Coherence/Negative_Coherence/Mixed_Coherence -- correlation sign, not a molecular activator/repressor call (item 7)",
-      stringsAsFactors = FALSE)
-  }
-  if (exists("lioness_analysis") && !is.null(lioness_analysis)) {
-    la <- lioness_analysis
-    summary_rows[[length(summary_rows) + 1]] <- data.frame(
-      Component = "5B_netZooR_v2", Parameter = "LIONESS_samples",
-      Threshold = "active track", Value = as.character(la$n_samples),
-      N = "", Cell_Type = ct, Phase = "netZooR_active",
-      Notes = paste(la$n_tfs, "TFs x", la$n_genes, "genes (full network)"), stringsAsFactors = FALSE)
-    summary_rows[[length(summary_rows) + 1]] <- data.frame(
-      Component = "5B_netZooR_v2", Parameter = "LIONESS_outliers",
-      Threshold = "mean cor < mean-2SD", Value = as.character(length(la$outlier_samples)),
-      N = as.character(la$n_samples), Cell_Type = ct, Phase = "netZooR_active",
-      Notes = if (length(la$outlier_samples) > 0) paste(la$outlier_samples, collapse = ", ") else "None",
-      stringsAsFactors = FALSE)
-  }
-  summary_rows[[length(summary_rows) + 1]] <- data.frame(Component = "5B_netZooR_v2",
-    Parameter = "n_motif_peaks", Threshold = "JASPAR p=1e-4",
-    Value = as.character(n_peaks_gr), N = as.character(n_motifs), Cell_Type = ct,
-    Phase = "netZooR_active", Notes = "Peaks scanned for motifs", stringsAsFactors = FALSE)
-
-  tf_summary <- dplyr::bind_rows(summary_rows)
-  prev_file <- file.path(WGCNA_DIR, safe_ct, paste0("manuscript_summary_", safe_ct, ".csv"))
-  combined <- if (file.exists(prev_file)) {
-    prev <- read.csv(prev_file, stringsAsFactors = FALSE, row.names = NULL) %>%
-      dplyr::mutate(N = as.character(N), Value = as.character(Value)) %>%
-      dplyr::filter(Phase != "netZooR_active")
-    dplyr::bind_rows(prev, tf_summary)
-  } else tf_summary
-  write.csv(combined, file.path(WGCNA_DIR, safe_ct, paste0("manuscript_summary_", safe_ct, ".csv")),
-            row.names = FALSE, quote = FALSE)
-  message(paste("  Manuscript summary:", nrow(combined), "rows"))
 
   # ------------------------------------------------------------------
   # CLEANUP

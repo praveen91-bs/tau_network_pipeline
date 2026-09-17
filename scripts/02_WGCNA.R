@@ -455,7 +455,7 @@ for (ct in CELL_GROUPS) {
     plist[[paste0(sel_mod, "_ADNC")]] <- p
   }
   if (length(plist) > 0) {
-    nc <- min(6, length(plist))
+    nc <- min(5, length(plist))
     ggsave(file.path(ct_dir, "WGCNA_GS_MM_Modules.png"), wrap_plots(plist, ncol = nc), width = 4 * nc,
            height = 3.5 * ceiling(length(plist) / nc), dpi = 300)
   }

@@ -34,19 +34,20 @@ for (ct in CELL_GROUPS) {
   GROUP_TEST <- "Dementia"
 
   MIN_GROUP_N       <- 8
-  HUB_KME_THRESHOLD <- 0.6        # |kME| floor for hub status (Part 3)
   REWIRE_PADJ_CUTOFF <- 0.05
 
   # Three-gate Highly_Differentiated selection: |Delta_kME| effect size,
   # hub-level kME magnitude in >=1 condition, and BH-padj on the Fisher r-to-z test.
   DELTA_KME_THRESHOLD <- 0.6
-  KME_MAG_THRESHOLD   <- 0.6
+  # Unified hub threshold: governs both signature-inclusion (gate 2 of
+  # Highly_Differentiated) and Part 3 hub categorisation.
+  HUB_KME_THRESHOLD   <- 0.6
 
   # Extended kME screen (selection-bias fix): genes that never cleared 02's
   # HVG variance filter (or that were clustered into a grey/unselected
   # module) still get a chance to be tested for rewiring here, matched to
   # whichever selected module they best correlate with on the combined
-  # (both-condition) eigengenes. Lenient floor -- well below KME_MAG_THRESHOLD
+  # (both-condition) eigengenes. Lenient floor -- well below HUB_KME_THRESHOLD
   # -- just to bound the pool to genes with a real module association; the
   # three/four gates above decide whether an extension gene counts as rewired.
   EXT_KME_SCREEN_THRESHOLD <- 0.3
@@ -214,6 +215,30 @@ for (ct in CELL_GROUPS) {
     ME_ref  <- moduleEigengenes(datExpr[ref_idx,  ], module_colors)$eigengenes
     ME_test <- moduleEigengenes(datExpr[test_idx, ], module_colors)$eigengenes
 
+    # Sign reconciliation: flip condition-specific eigengenes that are
+    # anti-correlated with the pooled-cohort eigengene (MEs from 02_WGCNA.R).
+    # kME values computed below inherit the corrected sign automatically.
+    message("  Eigengene sign reconciliation against pooled cohort:")
+    for (mod in selected_modules_clean) {
+      me_col <- paste0("ME", mod)
+      if (!(me_col %in% colnames(ME_ref)) || !(me_col %in% colnames(ME_test))) next
+
+      pooled_in_ref  <- MEs[rownames(ME_ref),  me_col]
+      pooled_in_test <- MEs[rownames(ME_test), me_col]
+
+      r_ref  <- as.numeric(WGCNA::bicor(ME_ref[[me_col]],  pooled_in_ref,  use = "p"))
+      r_test <- as.numeric(WGCNA::bicor(ME_test[[me_col]], pooled_in_test, use = "p"))
+
+      if (r_ref < 0) {
+        ME_ref[[me_col]] <- -ME_ref[[me_col]]
+        message(sprintf("    %s: flipped ME_ref (r=%.3f with pooled)", mod, r_ref))
+      }
+      if (r_test < 0) {
+        ME_test[[me_col]] <- -ME_test[[me_col]]
+        message(sprintf("    %s: flipped ME_test (r=%.3f with pooled)", mod, r_test))
+      }
+    }
+
     diff_kme_list <- purrr::map_dfr(selected_modules_clean, function(mod) {
       genes_in <- colnames(datExpr_all)[module_colors_all == mod]
       me_col   <- paste0("ME", mod)
@@ -236,7 +261,7 @@ for (ct in CELL_GROUPS) {
         kME_max = pmax(abs(kME_Control), abs(kME_AD)),
         # Three gates, all must clear (see config above).
         Rewired_Strict        = abs(Delta_kME) >= DELTA_KME_THRESHOLD,
-        Highly_Differentiated = Rewired_Strict & (kME_max >= KME_MAG_THRESHOLD) &
+        Highly_Differentiated = Rewired_Strict & (kME_max >= HUB_KME_THRESHOLD) &
                                  (padj < REWIRE_PADJ_CUTOFF)
       ) %>%
       dplyr::arrange(padj)
@@ -258,7 +283,7 @@ for (ct in CELL_GROUPS) {
       dplyr::mutate(
         kME_max               = pmax(abs(kME_Control), abs(kME_AD)),
         Rewired_Strict        = abs(Delta_kME) >= DELTA_KME_THRESHOLD,
-        Highly_Differentiated = Rewired_Strict & (kME_max >= KME_MAG_THRESHOLD) &
+        Highly_Differentiated = Rewired_Strict & (kME_max >= HUB_KME_THRESHOLD) &
                                  (padj < REWIRE_PADJ_CUTOFF)
       )
     message("  Re-computed Rewired_Strict + Highly_Differentiated (ΔkME, kME, padj gates) for resumed checkpoint")
@@ -547,12 +572,15 @@ for (ct in CELL_GROUPS) {
                  sum(diff_kme_list$padj < REWIRE_PADJ_CUTOFF, na.rm = TRUE), " / ",
                  nrow(diff_kme_list)))
   message(paste0("Highly differentiated genes (|Delta_kME| >= ", DELTA_KME_THRESHOLD,
-                 " & |kME| >= ", KME_MAG_THRESHOLD, " & padj < ", REWIRE_PADJ_CUTOFF, "): ",
+                 " & |kME| >= ", HUB_KME_THRESHOLD, " & padj < ", REWIRE_PADJ_CUTOFF, "): ",
                  sum(diff_kme_list$Highly_Differentiated, na.rm = TRUE), " / ", nrow(diff_kme_list)))
 
   # Volcano plot; red = Delta_kME gate, blue = padj gate.
   p_volcano <- ggplot(diff_kme_list, aes(x = Delta_kME, y = -log10(p), color = Module)) +
     geom_point(aes(alpha = Highly_Differentiated, size = Highly_Differentiated)) +
+    geom_point(data = subset(diff_kme_list, Highly_Differentiated), aes(x = Delta_kME, y = -log10(p)), shape = 21,
+               fill = diff_kme_list$Module[diff_kme_list$Highly_Differentiated],, color = "black", size = 2.8, stroke = 0.8) +
+    
     scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.2), guide = "none") +
     scale_size_manual(values = c(`TRUE` = 2.2, `FALSE` = 1.2), guide = "none") +
     scale_color_identity() +
@@ -561,13 +589,16 @@ for (ct in CELL_GROUPS) {
     geom_hline(yintercept = -log10(REWIRE_PADJ_CUTOFF), linetype = "dashed", color = "blue") +
     facet_wrap(~Module, scales = "free") +
     labs(title = paste0("Gene-level rewiring: ", GROUP_TEST, " vs ", GROUP_REF),
-         subtitle = paste0("Highlighted = highly differentiated: |Delta_kME| >= ",
-                           DELTA_KME_THRESHOLD, " AND |kME| >= ", KME_MAG_THRESHOLD,
-                           " AND padj < ", REWIRE_PADJ_CUTOFF),
-         x = "Delta_kME (AD - Control)", y = "-log10(p)") +
-    theme_minimal() + theme(legend.position = "none")
+         subtitle = paste0("Highlighted = highly differentiated: |Delta_kME| >= ", DELTA_KME_THRESHOLD, " AND |kME| >= ", 
+                           HUB_KME_THRESHOLD, " AND padj < ", REWIRE_PADJ_CUTOFF),
+         x = "Delta_kME (AD - Control)", y = "-log10(p)") + theme_minimal() + 
+    theme(legend.position = "none", panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.6),
+          strip.text = element_text(face = "bold", size = 13), plot.title = element_text(size = 18, face = "bold"),
+          plot.subtitle = element_text(size = 14, face = "bold.italic"), axis.title = element_text(size = 13),
+          axis.text = element_text(size = 11))
+  
   ggsave(file.path(ct_dir, "WGCNA_Differential_kME_Volcano.png"), p_volcano,
-         width = 10, height = 8, dpi = 600)
+         width = 12, height = 9, dpi = 600)
   message("  Saved: WGCNA_Differential_kME_Volcano.png")
 
   # ==============================================================================
@@ -581,19 +612,26 @@ for (ct in CELL_GROUPS) {
     dplyr::mutate(
       Hub_Control = abs(kME_Control) > HUB_KME_THRESHOLD,
       Hub_AD      = abs(kME_AD) > HUB_KME_THRESHOLD,
+      Delta_kME_Rewired = abs(Delta_kME) >= DELTA_KME_THRESHOLD,
       Category    = dplyr::case_when(
-        Hub_Control & Hub_AD                      ~ "Stable hub",
-        Hub_Control & !Hub_AD & padj < REWIRE_PADJ_CUTOFF ~ "AD-downregulated hub",
-        !Hub_Control & Hub_AD & padj < REWIRE_PADJ_CUTOFF ~ "AD-upregulated hub",
-        Hub_Control & !Hub_AD                     ~ "Non-hub (not significant)",
-        !Hub_Control & Hub_AD                     ~ "Non-hub (not significant)",
-        TRUE                                      ~ "Non-hub"
+        Hub_Control & Hub_AD ~ "Stable hub",
+        Hub_Control & !Hub_AD & Delta_kME_Rewired & padj < REWIRE_PADJ_CUTOFF ~ "AD rewiring-loss hub",
+        !Hub_Control & Hub_AD & Delta_kME_Rewired &padj < REWIRE_PADJ_CUTOFF ~ "AD rewiring-gain hub",
+        Hub_Control & !Hub_AD | !Hub_Control & Hub_AD ~ "Non-hub (not significant)", TRUE ~ "Non-hub"
       )
     ) %>%
     dplyr::select(Module, Gene, kME_Control, kME_AD, Delta_kME, padj, Category, Extension_Gene)
 
   utils::write.csv(hub_stability, file.path(ct_dir, "WGCNA_Hub_Gene_Stability.csv"),
                    row.names = FALSE)
+
+  # --- Hub-transition summary (gained / lost counts) ---
+  n_stable   <- sum(hub_stability$Category == "Stable hub", na.rm = TRUE)
+  n_gained   <- sum(hub_stability$Category == "AD rewiring-gain hub", na.rm = TRUE)
+  n_lost     <- sum(hub_stability$Category == "AD rewiring-loss hub", na.rm = TRUE)
+  n_nonsig   <- sum(hub_stability$Category == "Non-hub (not significant)", na.rm = TRUE)
+  message(sprintf("  Hub stability: %d stable, %d gained in AD, %d lost in AD, %d non-significant (of %d genes)",
+                  n_stable, n_gained, n_lost, n_nonsig, nrow(hub_stability)))
 
   # ==============================================================================
   # PART 4 — kME RANK SCATTER
@@ -613,23 +651,31 @@ for (ct in CELL_GROUPS) {
 
   # Faceted per-module version
   p_scatter_facet <- ggplot(hub_stability, aes(x = abs(kME_Control), y = abs(kME_AD))) +
+    geom_point(aes(color = Category, alpha = Category %in% c("AD rewiring-loss hub", "AD rewiring-gain hub"),
+                   size = Category %in% c("AD rewiring-loss hub", "AD rewiring-gain hub"))) +
     geom_point(aes(color = Category), alpha = 0.5, size = 1) +
     geom_abline(intercept = 0, slope = 1, linetype = "dashed", color = "grey40") +
-    geom_vline(xintercept = KME_MAG_THRESHOLD, linetype = "dotted", color = "grey30") +
-    geom_hline(yintercept = KME_MAG_THRESHOLD, linetype = "dotted", color = "grey30") +
-    scale_color_manual(values = c("Stable hub" = "#2166ac",
-                                  "AD-downregulated hub" = "#4393c3",
-                                  "AD-upregulated hub" = "#d6604d",
-                                  "Non-hub (not significant)" = "#bdbdbd",
-                                  "Non-hub" = "#f4a582")) +
+    geom_vline(xintercept = HUB_KME_THRESHOLD, linetype = "dotted", color = "grey30") +
+    geom_hline(yintercept = HUB_KME_THRESHOLD, linetype = "dotted", color = "grey30") +
+    scale_color_manual(values = c("Stable hub" = "seagreen", "AD rewiring-loss hub" = "#4393c3",
+                                  "AD rewiring-gain hub" = "#d6604d", "Non-hub (not significant)" = "#bdbdbd",
+                                  "Non-hub" = "grey15")) +
+    scale_alpha_manual(values = c(`TRUE` = 1, `FALSE` = 0.35), guide = "none") +
+    scale_size_manual(values = c(`TRUE` = 3, `FALSE` = 1.0), guide = "none") +
     facet_wrap(~Module, scales = "free") +
     labs(title = paste0("Module Membership: ", GROUP_REF, " vs ", GROUP_TEST, " (by module)"),
          subtitle = paste0("AD-upregulated = hub gained in AD | AD-downregulated = hub lost in AD",
-                           " | dotted = |kME| gate ", KME_MAG_THRESHOLD),
+                           " | dotted = |kME| gate ", HUB_KME_THRESHOLD),
          x = paste0("|kME| in ", GROUP_REF), y = paste0("|kME| in ", GROUP_TEST), color = "Category") +
-    theme_minimal() + theme(legend.position = "bottom")
+    theme_minimal() + theme(legend.position = "bottom", panel.border = element_rect(colour = "black", fill = NA, linewidth = 0.6), 
+                            strip.text = element_text(size = 13, face = "bold"), 
+                            plot.title = element_text(size = 18, face = "bold", margin = margin(b = 4)),
+                            plot.subtitle = element_text(size = 13, face = "bold.italic", margin = margin(b = 10)),
+                            axis.title = element_text(size = 13), axis.text = element_text(size = 11),
+                            legend.text = element_text(size = 10), legend.title = element_text(size = 11, face = "bold"))
+  
   ggsave(file.path(ct_dir, "WGCNA_kME_Rank_Scatter_Faceted.png"), p_scatter_facet,
-         width = 12, height = 10, dpi = 600)
+         width = 14, height = 11, dpi = 600)
   message("  Saved: WGCNA_kME_Rank_Scatter_Faceted.png")
 
   # ==============================================================================
@@ -681,7 +727,7 @@ for (ct in CELL_GROUPS) {
       # Tier1 = hub-status transition between conditions (Part 3 category);
       # Tier2 = cleared the four-gate without a transition. Prioritization only.
       Rewiring_Tier = dplyr::if_else(
-        Hub_Category %in% c("AD-upregulated hub", "AD-downregulated hub"),
+        Hub_Category %in% c("AD rewiring-gain hub", "AD rewiring-loss hub"),
         "Tier1_HubTransition", "Tier2_NonHubRewiring"
       )
     ) %>%
@@ -690,7 +736,7 @@ for (ct in CELL_GROUPS) {
   n_three_gate <- nrow(diff_kme_list %>% dplyr::filter(Highly_Differentiated) %>% dplyr::distinct(Gene))
   n_four_gate  <- nrow(final_genes)
   message(sprintf("  final active signature: %d genes (four-gate: |Delta_kME| >= %s & kME_max >= %s & padj < %s & perm_padj < 0.05)",
-                  n_four_gate, DELTA_KME_THRESHOLD, KME_MAG_THRESHOLD, REWIRE_PADJ_CUTOFF))
+                  n_four_gate, DELTA_KME_THRESHOLD, HUB_KME_THRESHOLD, REWIRE_PADJ_CUTOFF))
   message(sprintf("  perm gate removed %d genes vs the three-gate set", n_three_gate - n_four_gate))
   message(sprintf("  Rewiring_Tier: Tier1_HubTransition = %d, Tier2_NonHubRewiring = %d",
                   sum(final_genes$Rewiring_Tier == "Tier1_HubTransition"),
@@ -764,8 +810,8 @@ for (ct in CELL_GROUPS) {
                                             "Hub_Category", "Extension_Gene", "Host_Gene",
                                             "Possible_Host_Gene_Artifact")],
                method   = "rewiring_three_gate_v3",
-               criteria = list(delta_kme_threshold = DELTA_KME_THRESHOLD,
-                              kme_mag_threshold   = KME_MAG_THRESHOLD,
+                criteria = list(delta_kme_threshold = DELTA_KME_THRESHOLD,
+                               kme_mag_threshold   = HUB_KME_THRESHOLD,
                               padj_threshold      = REWIRE_PADJ_CUTOFF,
                               n_boot_kme          = N_BOOT_KME,
                               n_perm_delta_kme    = N_PERM_DELTA_KME,
