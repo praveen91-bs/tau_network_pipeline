@@ -61,9 +61,6 @@ SAMPLE_COLS <- c(condition = "Cognitive Status", sex = "Sex", age = "Age at Deat
   libbatch = "library_prep")
 SAMPLE_COLS <- SAMPLE_COLS[SAMPLE_COLS %in% colnames(seaad)]
 
-# cell_group/cell_sub_group are assigned only by 00B; used here for validation tables only.
-
-
 # ==== Loop 1: RNA+ATAC QC/processing per sample ====
 h5_files <- list.files(H5_DIR, pattern = "_matrix\\.h5$", full.names = TRUE)
 stats_csv <- file.path(RDS_DIR, "new_all_samples_cell_stats.csv")
